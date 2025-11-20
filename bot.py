@@ -1,9 +1,9 @@
 import os
 import sqlite3
-import asyncio
 from flask import Flask
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
+from threading import Thread
 
 # ---------------- SQLite -----------------
 conn = sqlite3.connect("notes.db", check_same_thread=False)
@@ -84,13 +84,20 @@ flask_app = Flask(__name__)
 def home():
     return "Бот работает круглосуточно!"
 
+def run_flask():
+    flask_app.run(host="0.0.0.0", port=10000)
+
 # ---------------- Main -----------------
-async def main():
+def main():
     TOKEN = os.getenv("BOT_TOKEN")
     if not TOKEN:
         print("Ошибка: нужно задать BOT_TOKEN")
         return
 
+    # Запуск Flask в отдельном потоке
+    Thread(target=run_flask).start()
+
+    # Запуск Telegram Bot
     app = ApplicationBuilder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(button))
@@ -98,15 +105,7 @@ async def main():
     app.add_handler(MessageHandler(filters.PHOTO | filters.VIDEO | filters.Document.ALL, handle_message))
 
     print("Бот запущен...")
-
-    # Запуск Telegram и Flask одновременно
-    loop = asyncio.get_event_loop()
-    from threading import Thread
-    def run_flask():
-        flask_app.run(host="0.0.0.0", port=10000)
-    Thread(target=run_flask).start()
-
-    await app.run_polling()
+    app.run_polling()
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
