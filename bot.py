@@ -1,9 +1,8 @@
 import os
 import sqlite3
-from flask import Flask
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from flask import Flask, request
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, Bot
 from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
-from threading import Thread
 
 # ---------------- SQLite -----------------
 conn = sqlite3.connect("notes.db", check_same_thread=False)
@@ -17,7 +16,7 @@ CREATE TABLE IF NOT EXISTS notes (
 """)
 conn.commit()
 
-# ---------------- Telegram Bot -----------------
+# ---------------- Telegram Handlers -----------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [InlineKeyboardButton("Добавить заметку", callback_data='add')],
@@ -77,35 +76,41 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("Пожалуйста, ищи по тексту.")
         context.user_data['mode'] = None
 
-# ---------------- Flask для ping -----------------
+# ---------------- Flask App для Webhook -----------------
 flask_app = Flask(__name__)
 
+TOKEN = os.getenv("BOT_TOKEN")
+if not TOKEN:
+    raise ValueError("BOT_TOKEN не задан в переменных окружения!")
+
+bot = Bot(token=TOKEN)
+app = ApplicationBuilder().token(TOKEN).build()
+app.add_handler(CommandHandler("start", start))
+app.add_handler(CallbackQueryHandler(button))
+app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+app.add_handler(MessageHandler(filters.PHOTO | filters.VIDEO | filters.Document.ALL, handle_message))
+
+# Endpoint для Webhook
+@flask_app.route(f"/{TOKEN}", methods=["POST"])
+def webhook():
+    update = Update.de_json(request.get_json(force=True), bot)
+    import asyncio
+    asyncio.run(app.update_queue.put(update))
+    return "OK"
+
+# Root для проверки ping
 @flask_app.route("/")
 def home():
-    return "Бот работает круглосуточно!"
-
-def run_flask():
-    flask_app.run(host="0.0.0.0", port=10000)
-
-# ---------------- Main -----------------
-def main():
-    TOKEN = os.getenv("BOT_TOKEN")
-    if not TOKEN:
-        print("Ошибка: нужно задать BOT_TOKEN")
-        return
-
-    # Запуск Flask в отдельном потоке
-    Thread(target=run_flask).start()
-
-    # Запуск Telegram Bot
-    app = ApplicationBuilder().token(TOKEN).build()
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CallbackQueryHandler(button))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-    app.add_handler(MessageHandler(filters.PHOTO | filters.VIDEO | filters.Document.ALL, handle_message))
-
-    print("Бот запущен...")
-    app.run_polling()
+    return "Бот работает через Webhook!"
 
 if __name__ == "__main__":
-    main()
+    # Устанавливаем webhook на Render
+    url = os.getenv("RENDER_EXTERNAL_URL")  # Render сам задаёт URL сервиса
+    if not url:
+        raise ValueError("RENDER_EXTERNAL_URL не задан в переменных окружения!")
+
+    webhook_url = f"{url}/{TOKEN}"
+    bot.set_webhook(webhook_url)
+    print(f"Webhook установлен: {webhook_url}")
+
+    flask_app.run(host="0.0.0.0", port=int(os.getenv("PORT", 10000)))
