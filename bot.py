@@ -6,6 +6,7 @@ from telegram.ext import (
     ApplicationBuilder, CommandHandler, CallbackQueryHandler, 
     MessageHandler, filters, ContextTypes
 )
+import asyncio
 
 # ---------------- Flask App -----------------
 flask_app = Flask(__name__)
@@ -80,7 +81,6 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         note_id = int(query.data.split('_')[1])
         delete_note(note_id)
         await query.edit_message_text("Заметка удалена!")
-        # Показываем главное меню после удаления
         await show_main_menu(query, context)
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -102,7 +102,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         await update.message.reply_text("Заметка сохранена!")
         context.user_data['mode'] = None
-        # Показываем главное меню после добавления
         await show_main_menu(update, context)
 
     elif mode == 'searching':
@@ -118,7 +117,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             await update.message.reply_text("Пожалуйста, ищи по тексту.")
         context.user_data['mode'] = None
-        # Показываем главное меню после поиска
         await show_main_menu(update, context)
 
 # ---------------- Register Handlers -----------------
@@ -132,9 +130,14 @@ application.add_handler(MessageHandler(filters.PHOTO | filters.VIDEO | filters.D
 def webhook():
     data = request.get_json(force=True)
     update = Update.de_json(data, bot)
-    import asyncio
-    asyncio.run(application.process_update(update))  # Асинхронно обрабатываем update
+    loop = asyncio.get_event_loop()
+    loop.create_task(application.process_update(update))  # безопасно для Flask
     return "OK"
+
+# ---------------- Favicon (чтобы не было 404) -----------------
+@flask_app.route("/favicon.ico")
+def favicon():
+    return "", 204
 
 # ---------------- Healthcheck -----------------
 @flask_app.route("/")
